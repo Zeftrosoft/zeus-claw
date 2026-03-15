@@ -6,7 +6,14 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'LLM_PROVIDER',
+  'LLM_BASE_URL',
+  'LLM_MODEL',
+  'LLM_API_KEY',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -71,3 +78,27 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// LLM Provider: 'claude' (default), 'vllm', or 'ollama'
+export const LLM_PROVIDER = (
+  process.env.LLM_PROVIDER || envConfig.LLM_PROVIDER || 'claude'
+).toLowerCase() as 'claude' | 'vllm' | 'ollama';
+
+// Base URL for vLLM/Ollama OpenAI-compatible API
+const LLM_BASE_URL_DEFAULTS: Record<string, string> = {
+  ollama: 'http://host.docker.internal:11434/v1',
+  vllm: 'http://host.docker.internal:8000/v1',
+};
+export const LLM_BASE_URL =
+  process.env.LLM_BASE_URL ||
+  envConfig.LLM_BASE_URL ||
+  LLM_BASE_URL_DEFAULTS[LLM_PROVIDER] ||
+  '';
+
+// Model name for vLLM/Ollama (ignored when using Claude)
+export const LLM_MODEL =
+  process.env.LLM_MODEL || envConfig.LLM_MODEL || '';
+
+// Optional API key for vLLM (Ollama doesn't need one)
+export const LLM_API_KEY =
+  process.env.LLM_API_KEY || envConfig.LLM_API_KEY || '';

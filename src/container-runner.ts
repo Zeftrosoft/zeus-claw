@@ -14,6 +14,10 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  LLM_API_KEY,
+  LLM_BASE_URL,
+  LLM_MODEL,
+  LLM_PROVIDER,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -221,21 +225,33 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
+  // Pass LLM provider config to the container
+  args.push('-e', `LLM_PROVIDER=${LLM_PROVIDER}`);
 
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  if (LLM_PROVIDER === 'claude') {
+    // Claude path: route API traffic through the credential proxy
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
+
+    // Mirror the host's auth method with a placeholder value.
+    const authMode = detectAuthMode();
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    // vLLM/Ollama path: container talks directly to the local model server.
+    // Replace localhost with host.docker.internal so the container can reach the host.
+    const baseUrl = LLM_BASE_URL.replace(
+      /localhost|127\.0\.0\.1/,
+      CONTAINER_HOST_GATEWAY,
+    );
+    args.push('-e', `LLM_BASE_URL=${baseUrl}`);
+    if (LLM_MODEL) args.push('-e', `LLM_MODEL=${LLM_MODEL}`);
+    if (LLM_API_KEY) args.push('-e', `LLM_API_KEY=${LLM_API_KEY}`);
   }
 
   // Runtime-specific args for host gateway resolution

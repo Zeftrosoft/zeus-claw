@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -335,6 +335,7 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  queryFn: typeof import('@anthropic-ai/claude-agent-sdk').query,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
@@ -389,7 +390,7 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  for await (const message of query({
+  for await (const message of queryFn({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
@@ -481,6 +482,18 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Route to the appropriate agent runner based on LLM_PROVIDER
+  const provider = (process.env.LLM_PROVIDER || 'claude').toLowerCase();
+  if (provider === 'vllm' || provider === 'ollama') {
+    log(`Using OpenAI-compatible agent runner (provider: ${provider})`);
+    const { runOpenAIAgent } = await import('./openai-agent.js');
+    await runOpenAIAgent(containerInput);
+    return;
+  }
+
+  // --- Claude Code SDK path (default) ---
+  const { query } = await import('@anthropic-ai/claude-agent-sdk');
+
   // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
@@ -511,7 +524,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, query, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
